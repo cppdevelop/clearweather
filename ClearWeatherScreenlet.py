@@ -376,9 +376,28 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
                 ctx.save()
                 ctx.translate(-2, 0)
                 ctx.scale(.6,.6)
+                iconTranslate = {
+                    '01d' : '32',
+                    '01n' : '31',
+                    '02d' : '30',
+                    '02n' : '29',
+                    '03d' : '28',
+                    '03n' : '27',
+                    '04d' : '26',
+                    '04n' : '26',
+                    '09d' : '12',
+                    '09n' : '40',
+                    '10d' : '39',
+                    '10n' : '45',
+                    '11d' : '17',
+                    '11n' : '35',
+                    '13d' : '41',
+                    '13n' : '42',
+                    '50d' : '20',
+                    '50n' : '20',
+                }
                 try:
-                    if weather["list"][0]["weather"][0]["icon"]=="-": weather["list"][0]["weather"][0]["icon"]="48"
-                    icon = str(self.get_icon(int(weather["list"][0]["weather"][0]["icon"])) )
+                    icon = iconTranslate.get(weather["list"][0]["weather"][0]["icon"], "48")
                     self.theme.render(ctx,icon)
                 except:
                     pass
