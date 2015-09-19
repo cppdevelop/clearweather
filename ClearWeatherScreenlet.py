@@ -157,7 +157,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
 
     def update_weather_data(self):
         temp = self.parseWeatherData()
-        temp2 = self.parseWeatherDataHourly()
+        #temp2 = self.parseWeatherDataHourly()
 
         if temp == {} :    ##did we get any data?  if not...
             if self.show_error_message==1 and self.updated_recently == 1:
@@ -167,7 +167,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
             #if temp[0]["where"].find(',') > -1:
             #    temp[0]["where"] = temp[0]["where"][:temp[0]["where"].find(',')]
             self.latest = temp
-            self.latestHourly = temp2
+            #self.latestHourly = temp2
             self.updated_recently = 1
             self.redraw_canvas()
 
@@ -395,7 +395,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
 
     def on_draw(self, ctx):
         weather = self.getJsonWeather()
-        hourly = self.getJsonWeather();
+        #hourly = self.getJsonWeather();
 
         # set size
         ctx.scale(self.scale, self.scale)
