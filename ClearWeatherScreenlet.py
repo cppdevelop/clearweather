@@ -51,7 +51,6 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
     lastx = 0   ## the cursor position inside the window (is there a better way to do this??)
     over_button = 1
 
-    ZIP = "POXX0079"
     use_metric = True
     show_daytemp = True
     mini = False
@@ -60,9 +59,33 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
     background_color = (0,0,0, 0.8)
     latest = []          ## the most recent settings we could get...
     latestHourly = []
+    longitude = '37.617777'
+    latitude = '55.755833'
+    #cityId = '524894' #Moscow
+    cityId = ''
 
     updated_recently = 0 ## don't keep showing the error messages until a connection has been established
                  ## and then lost again.
+    iconTranslate = {
+                    '01d' : '32',
+                    '01n' : '31',
+                    '02d' : '30',
+                    '02n' : '29',
+                    '03d' : '28',
+                    '03n' : '27',
+                    '04d' : '26',
+                    '04n' : '26',
+                    '09d' : '12',
+                    '09n' : '40',
+                    '10d' : '39',
+                    '10n' : '45',
+                    '11d' : '17',
+                    '11n' : '35',
+                    '13d' : '41',
+                    '13n' : '42',
+                    '50d' : '20',
+                    '50n' : '20',
+                }
 
     # constructor
     def __init__(self, text="", **keyword_args):
@@ -70,15 +93,12 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
         screenlets.Screenlet.__init__(self, width=int(132 * self.scale), height=int(100 * self.scale),uses_theme=True, **keyword_args)
         # set theme
         self.theme_name = "default"
-        # add zip code menu item
-        self.add_menuitem("zipcode", "Zip Code...")
+        self.add_menuitem("latlon", "Geo coordinates...")
         self.add_menuitem("mini", "Toggle mini-view")
         # init the timeout function
         self.update_interval = self.update_interval
         self.add_options_group('Weather',
             'The weather widget settings')
-        self.add_option(StringOption('Weather', 'ZIP',
-            str(self.ZIP), 'ZIP', 'The ZIP code to be monitored taken from Weather.com'), realtime=False)
         self.add_option(BoolOption('Weather', 'show_error_message',
             bool(self.show_error_message), 'Show error messages',
             'Show an error message on invalid location code'))
@@ -98,15 +118,18 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
             self.font_color, 'Text color', 'font_color'))
         self.add_option(ColorOption('Weather','background_color',
             self.background_color, 'Back color(only with default theme)', 'only works with default theme'))
+        self.add_option(StringOption('Weather', 'latitude',
+                                     str(self.latitude), 'latitude', 'Latitude'), realtime = False)
+        self.add_option(StringOption('Weather', 'longitude',
+                                     str(self.longitude), 'longitude', 'Longitude'), realtime = False)
+        self.add_option(StringOption('Weather', 'cityId',
+                                     str(self.cityId), 'cityId', 'City ID'), realtime = False)
 
     # attribute-"setter", handles setting of attributes
     def __setattr__(self, name, value):
         # call Screenlet.__setattr__ in baseclass (ESSENTIAL!!!!)
         screenlets.Screenlet.__setattr__(self, name, value)
         # check for this Screenlet's attributes, we are interested in:
-        if name == "ZIP":
-            self.__dict__[name] = value
-            gobject.idle_add(self.update_weather_data)
         if name == "update_interval":
             if value > 0:
                 self.__dict__['update_interval'] = value
@@ -116,6 +139,10 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
             else:
                 # TODO: raise exception!!!
                 pass
+        if name == "latitude" or name == "longitude" or name == "cityId":
+            self.__dict__[name] = value
+            gobject.idle_add(self.update_weather_data)
+
 
     def on_init (self):
         print "Screenlet has been initialized."
@@ -132,7 +159,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
         temp = self.parseWeatherData()
         temp2 = self.parseWeatherDataHourly()
 
-        if len(temp) == 0 or temp[0]["where"]  == '':    ##did we get any data?  if not...
+        if temp == {} :    ##did we get any data?  if not...
             if self.show_error_message==1 and self.updated_recently == 1:
                 self.show_error()
             self.updated_recently = 0
@@ -155,8 +182,14 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
             self.getPressure(weatherDict),
             self.getHumidity(weatherDict))
 
+    def getCity(self, jsonWeatherData):
+        return jsonWeatherData["city"]["name"]
+
     def getWeatherDate(self, weatherDict):
         return datetime.datetime.fromtimestamp(int(weatherDict["dt"])).strftime('%Y-%m-%d')
+
+    def getWeatherDoW(self, weatherDict):
+        return datetime.datetime.fromtimestamp(int(weatherDict["dt"])).strftime('%a')
 
     def getMinTemp(self, weatherDict):
         return int(round(self.tempToCelsius(weatherDict["temp"]["min"])))
@@ -183,23 +216,38 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
         proxies = proxy.Proxy().get_proxy()
         jsonWeatherData = {}
         try:
-            baseUrl = 'http://api.openweathermap.org/data/2.5/forecast/daily?lat=%f&lon=%f&cnt=%d'
-            latitude = 55.755833
-            longitude = 37.617777
-            dayCount  =10
-            url = baseUrl % (latitude, longitude, dayCount)
-            jsonWeatherData = json.loads(urllib2.urlopen(url).read())
-            print jsonWeatherData
-            print ""
-            self.printCity(jsonWeatherData["city"])
+            dayCount = 7
+            url = ''
+            if self.cityId == '':
+                baseUrl = 'http://api.openweathermap.org/data/2.5/forecast/daily?lat=%s&lon=%s&cnt=%d'
+                url = baseUrl % (self.latitude, self.longitude, dayCount)
+            else:
+                baseUrl = 'http://api.openweathermap.org/data/2.5/forecast/daily?id=%s&cnt=%d'
+                url = baseUrl % (self.cityId, dayCount)
 
-            for i in range(len(jsonWeatherData["list"])):
-                self.printWeather(jsonWeatherData["list"][i])
+            print url
+            jsonWeatherData = json.loads(urllib2.urlopen(url).read())
+
+            print jsonWeatherData
+            if jsonWeatherData.get('cod', 0) != '404':
+                print ""
+                self.printCity(jsonWeatherData["city"])
+
+                for i in range(len(jsonWeatherData["list"])):
+                    self.printWeather(jsonWeatherData["list"][i])
+            else:
+                print url
+                print jsonWeatherData
+                jsonWeatherData = {}
+                return jsonWeatherData
 
         except (IOError, socket.error), e:
             print "Error retrieving weather data", e
             self.show_error(("Error retrieving weather data", e))
         return jsonWeatherData
+
+    def getIcon(self, weather, index):
+        return self.iconTranslate.get(weather["list"][index]["weather"][0]["icon"], "48")
 
     def parseWeatherData(self):
         if self.use_metric:
@@ -376,31 +424,8 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
                 ctx.save()
                 ctx.translate(-2, 0)
                 ctx.scale(.6,.6)
-                iconTranslate = {
-                    '01d' : '32',
-                    '01n' : '31',
-                    '02d' : '30',
-                    '02n' : '29',
-                    '03d' : '28',
-                    '03n' : '27',
-                    '04d' : '26',
-                    '04n' : '26',
-                    '09d' : '12',
-                    '09n' : '40',
-                    '10d' : '39',
-                    '10n' : '45',
-                    '11d' : '17',
-                    '11n' : '35',
-                    '13d' : '41',
-                    '13n' : '42',
-                    '50d' : '20',
-                    '50n' : '20',
-                }
-                try:
-                    icon = iconTranslate.get(weather["list"][0]["weather"][0]["icon"], "48")
-                    self.theme.render(ctx,icon)
-                except:
-                    pass
+                icon = self.iconTranslate.get(weather["list"][0]["weather"][0]["icon"], "48")
+                self.theme.render(ctx,icon)
 
                 ctx.restore()
 
@@ -413,11 +438,10 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
             #        ctx.restore()
 
                 degree = unichr(176)
-                #if len(str(weather[0]["temp"])) == 3:
-                ctx.translate(-7, 0)
+                if len(str(self.getDayTemp(weather["list"][0]))) == 3:
+                    ctx.translate(-7, 0)
                 self.draw_text(ctx,'<b>' + str(self.getDayTemp(weather["list"][0])) + degree +'</b>', 90,25, self.font.split(' ')[0], 14,  self.width,pango.ALIGN_LEFT)
-
-                #self.draw_text(ctx,'<b>' + weather[0]["where"][:weather[0]["where"].find(',')][:10] +'</b>', -5,50, self.font.split(' ')[0], 6, self.width,pango.ALIGN_RIGHT)
+                self.draw_text(ctx,'<b>' + self.getCity(weather) +'</b>', -5,50, self.font.split(' ')[0], 6, self.width,pango.ALIGN_RIGHT)
 
             #    ctx.translate(0, 6)
             #    p_layout = ctx.create_layout()
@@ -458,7 +482,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
 
 
         #        ctx.translate(0, 5)
-        #        p_layout.set_markup("p:<b>"+weather[0]["pressure"]+"</b>  h:<b>"+weather[0]["humid"] + "%</b>  w:<b>" +weather[0]["windspeed"] + " m/s</b>")
+        #        p_layout.set_markup("p:<b>"+weather["list"][0]["pressure"]+"</b>  h:<b>"+weather["list"][0]["humidity"] + "%</b>  w:<b>" +weather["list"][0]["speed"] + " m/s</b>")
         #        ctx.show_layout(p_layout)
 
                 if (self.mini == False):
@@ -468,24 +492,24 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
                     self.theme.render(ctx,'day-bg')
                     #self.theme['day-bg.svg'].render_cairo(ctx)   ###render the days background
                     #print self.theme.path
-                    self.draw_text(ctx,'<b>' + str(self.getMinTemp(weather["list"][1])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' + str(self.getWeatherDoW(weather["list"][1])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                 #    p_layout.set_markup('<b>' +weather[1]["day"][:3] + '</b>')
                 #    ctx.show_layout(p_layout)
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][2])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getWeatherDoW(weather["list"][2])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][3])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getWeatherDoW(weather["list"][3])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][4])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getWeatherDoW(weather["list"][4])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][5])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getWeatherDoW(weather["list"][5])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][6])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getWeatherDoW(weather["list"][6])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
 
                     ctx.restore()
@@ -511,19 +535,19 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
                     #self.theme['divider.svg'].render_cairo(ctx)
                     #ctx.restore()
 
-
-                    #ctx.save()
-                    #ctx.translate(14, 68)
-                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[1]["nighticon"]))+ '.png',22,22)
-                    #ctx.translate(24,0)
-                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[2]["dayicon"]))+ '.png',22,22)
-                    #ctx.translate(24,0)
-                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[3]["dayicon"]))+ '.png',22,22)
-                    #ctx.translate(24, 0)
-                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[4]["dayicon"]))+ '.png',22,22)
-                    #ctx.translate(24,0)
-                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[5]["dayicon"]))+ '.png',22,22)
-                    #ctx.restore()
+                    #self.iconTranslate.get(weather["list"][0]["weather"][0]["icon"], "48")
+                    ctx.save()
+                    ctx.translate(14, 68)
+                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.getIcon(weather, 1)+ '.png',22,22)
+                    ctx.translate(24,0)
+                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.getIcon(weather, 2)+ '.png',22,22)
+                    ctx.translate(24,0)
+                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.getIcon(weather, 3)+ '.png',22,22)
+                    ctx.translate(24, 0)
+                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.getIcon(weather, 4)+ '.png',22,22)
+                    ctx.translate(24,0)
+                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.getIcon(weather, 5)+ '.png',22,22)
+                    ctx.restore()
 
                     if self.show_daytemp == True:
                         ctx.save()
@@ -549,6 +573,9 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
 
                 self.draw_text(ctx,'<b>' + str(self.getMinTemp(weather["list"][1]))+degree+'</b>', 68, 34, self.font.split(' ')[0], 5, self.width,pango.ALIGN_LEFT)
 
+                self.draw_text(ctx,'<b>' + str(self.getPressure(weather["list"][0])) +' mm Hg</b>', 64, 44, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
+                self.draw_text(ctx,'<b>' + str(self.getHumidity(weather["list"][0])) +'%</b>', 64, 50, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
+
                 #if weather[1]["dayppcp"] <> '0':
                     #self.draw_text(ctx,'<i>' + weather[1]["dayppcp"]+'%</i>', 68, 40, self.font.split(' ')[0], 5, self.width,pango.ALIGN_LEFT)
 
@@ -563,7 +590,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
 
 
             if y >= 75 and x <= 132 and x >= 110:
-                os.system('xdg-open http://weather.com')
+                os.system('xdg-open http://openweathermap.org')
 
     def on_draw_shape(self,ctx):
         if self.theme:
@@ -572,46 +599,45 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
 
     def menuitem_callback(self, widget, id):
         screenlets.Screenlet.menuitem_callback(self, widget, id)
-        if id=="zipcode":
-            self.show_edit_dialog()
-            self.update()
         if id == "mini":
             self.mini = not self.mini
             self.update()
+        if id == "latlon":
+            self.show_latlon_dialog()
+            self.update()
 
-
-
-    def show_edit_dialog(self):
-        # create dialog
-        dialog = gtk.Dialog("Zip Code", self.window)
+    def show_latlon_dialog(self):
+        dialog = gtk.Dialog("Latitude & longitude", self.window)
         dialog.resize(300, 100)
         dialog.add_buttons(gtk.STOCK_OK, gtk.RESPONSE_OK,
             gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL)
-        entrybox = gtk.Entry()
-        entrybox.set_text(str(self.ZIP))
-        dialog.vbox.add(entrybox)
-        entrybox.show()
+        entrybox1 = gtk.Entry()
+        entrybox1.set_text(str(self.latitude))
+        dialog.vbox.add(entrybox1)
+        entrybox1.show()
+
+        entrybox2 = gtk.Entry()
+        entrybox2.set_text(str(self.longitude))
+        dialog.vbox.add(entrybox2)
+        entrybox2.show()
         # run dialog
         response = dialog.run()
         if response == gtk.RESPONSE_OK:
-            self.ZIP = entrybox.get_text()
+            self.latitude = entrybox1.get_text()
+            self.longitude = entrybox2.get_text()
             self.updated_recently = 1
         dialog.hide()
         self.update()
 
-
-
-
-
     def show_error(self, reason=None):
 
-        dialog = gtk.Dialog("Zip Code", self.window)
+        dialog = gtk.Dialog("ClearWeather error", self.window)
         dialog.resize(300, 100)
         dialog.add_buttons(gtk.STOCK_OK, gtk.RESPONSE_OK)
 
         reasonstr = "\nReason: %s" % reason if reason is not None else ""
 
-        label = gtk.Label("Could not reach weather.com.  Check your internet connection and location and try again."+reasonstr)
+        label = gtk.Label("Could not reach http://api.openweathermap.org.  Check your internet connection and location and try again."+reasonstr)
         dialog.vbox.add(label)
         check = gtk.CheckButton("Do not show this again")
         dialog.vbox.add(check)
