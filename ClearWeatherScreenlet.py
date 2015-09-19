@@ -9,6 +9,9 @@
 
 #ClearWeatherScreenlet (c) Whise <helder.fraga@hotmail.com>
 
+import datetime
+import json
+import urllib2
 import re
 from urllib import urlopen
 import socket # for socket.error
@@ -141,6 +144,62 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
             self.updated_recently = 1
             self.redraw_canvas()
 
+    def printCity(self, jsonWeatherDataCityDict) :
+        print jsonWeatherDataCityDict["country"], jsonWeatherDataCityDict["name"], jsonWeatherDataCityDict["id"]
+
+    def printWeather(self, weatherDict):
+        print "%s: t: %d - %d, p: %d, h: %d%%" % (
+            self.getWeatherDate(weatherDict),
+            self.getMinTemp(weatherDict),
+            self.getMaxTemp(weatherDict),
+            self.getPressure(weatherDict),
+            self.getHumidity(weatherDict))
+
+    def getWeatherDate(self, weatherDict):
+        return datetime.datetime.fromtimestamp(int(weatherDict["dt"])).strftime('%Y-%m-%d')
+
+    def getMinTemp(self, weatherDict):
+        return int(round(self.tempToCelsius(weatherDict["temp"]["min"])))
+
+    def getMaxTemp(self, weatherDict):
+        return int(round(self.tempToCelsius(weatherDict["temp"]["max"])))
+
+    def getDayTemp(self, weatherDict):
+        return int(round(self.tempToCelsius(weatherDict["temp"]["day"])))
+
+    def getPressure(self, weatherDict):
+        return int(round(self.pressure_hPa_to_mmHg(weatherDict["pressure"])))
+
+    def getHumidity(self, weatherDict):
+        return weatherDict["humidity"]
+
+    def tempToCelsius(self, temp):
+        return temp - 273.15
+
+    def pressure_hPa_to_mmHg(self, hPa):
+        return hPa * 0.750061561303
+
+    def getJsonWeather(self) :
+        proxies = proxy.Proxy().get_proxy()
+        jsonWeatherData = {}
+        try:
+            baseUrl = 'http://api.openweathermap.org/data/2.5/forecast/daily?lat=%f&lon=%f&cnt=%d'
+            latitude = 55.755833
+            longitude = 37.617777
+            dayCount  =10
+            url = baseUrl % (latitude, longitude, dayCount)
+            jsonWeatherData = json.loads(urllib2.urlopen(url).read())
+            print jsonWeatherData
+            print ""
+            self.printCity(jsonWeatherData["city"])
+
+            for i in range(len(jsonWeatherData["list"])):
+                self.printWeather(jsonWeatherData["list"][i])
+
+        except (IOError, socket.error), e:
+            print "Error retrieving weather data", e
+            self.show_error(("Error retrieving weather data", e))
+        return jsonWeatherData
 
     def parseWeatherData(self):
         if self.use_metric:
@@ -148,28 +207,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
         else:
             unit = 's'
 
-        forecast = []
-
-
-        proxies = proxy.Proxy().get_proxy()
-        try:
-            data = urlopen('http://xoap.weather.com/weather/local/'+self.ZIP+'?cc=*&dayf=10&prod=xoap&par=1003666583&key=4128909340a9b2fc&unit='+unit + '&link=xoap',proxies=proxies).read()
-
-            dcstart = data.find('<loc ')
-            dcstop = data.find('</cc>')     ###### current conditions
-            data_current = data[dcstart:dcstop]
-            forecast.append(self.tokenizeCurrent(data_current))
-
-            for x in range(10):
-                dcstart = data.find('<day d=\"'+str(x))
-                dcstop = data.find('</day>',dcstart)   #####10-day forecast
-                day = data[dcstart:dcstop]
-                forecast.append(self.tokenizeForecast(day))
-        except (IOError, socket.error), e:
-            print "Error retrieving weather data", e
-            self.show_error(("Error retrieving weather data", e))
-
-        return forecast
+        return self.getJsonWeather()
 
 
     def parseWeatherDataHourly(self):
@@ -178,21 +216,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
         else:
             unit = 's'
 
-        hforecast = []
-        try:
-
-            proxies = proxy.Proxy().get_proxy()
-            data = urlopen('http://xoap.weather.com/weather/local/'+self.ZIP+'?cc=*&dayf=10&prod=xoap&par=1003666583&key=4128909340a9b2fc&unit='+unit+'&hbhf=12&link=xoap',proxies=proxies).read()
-            for x in range(8):
-                dcstart = data.find('<hour h=\"'+str(x))
-                dcstop = data.find('</hour>',dcstart)   ####hourly forecast
-                hour = data[dcstart:dcstop]
-                hforecast.append(self.tokenizeForecastHourly(hour))
-        except (IOError, socket.error), e:
-            print "Error retrieving weather data", e
-            self.show_error(("Error retrieving weather data", e))
-
-        return hforecast
+        return self.getJsonWeather()
 
 
     def tokenizeForecast(self, data):
@@ -322,8 +346,8 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
 
 
     def on_draw(self, ctx):
-        weather = self.latest
-        hourly = self.latestHourly
+        weather = self.getJsonWeather()
+        hourly = self.getJsonWeather();
 
         # set size
         ctx.scale(self.scale, self.scale)
@@ -332,7 +356,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
         ctx.set_source_rgba(*self.background_color)
         if self.theme:
             s = self.theme.path
-            if (self.mini == False and weather != []):
+            if (self.mini == False and weather != {}):
                 self.theme.render(ctx,'weather-bg')
 
                 if self.theme_name == 'default':self.draw_rounded_rectangle(ctx,11.5,18.5,8,120,80)
@@ -344,7 +368,7 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
         ctx.set_source_rgba(*self.font_color)
         # draw memory-graph
         if self.theme:
-            if weather == []:
+            if weather == {}:
 
                 self.draw_text(ctx,'<b>No weather information available</b>', 15, 35, self.font.split(' ')[0], 4,  self.width,pango.ALIGN_LEFT)
 
@@ -352,9 +376,13 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
                 ctx.save()
                 ctx.translate(-2, 0)
                 ctx.scale(.6,.6)
-                if weather[0]["icon"]=="-": weather[0]["icon"]="48"
-                icon = str(self.get_icon(int(weather[0]["icon"])) )
-                self.theme.render(ctx,icon)
+                try:
+                    if weather["list"][0]["weather"][0]["icon"]=="-": weather["list"][0]["weather"][0]["icon"]="48"
+                    icon = str(self.get_icon(int(weather["list"][0]["weather"][0]["icon"])) )
+                    self.theme.render(ctx,icon)
+                except:
+                    pass
+
                 ctx.restore()
 
             #    for x in range(4):
@@ -366,11 +394,11 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
             #        ctx.restore()
 
                 degree = unichr(176)
-                if len(str(weather[0]["temp"])) == 3:
-                    ctx.translate(-7, 0)
-                self.draw_text(ctx,'<b>' + weather[0]["temp"] + degree +'</b>', 90,25, self.font.split(' ')[0], 14,  self.width,pango.ALIGN_LEFT)
+                #if len(str(weather[0]["temp"])) == 3:
+                ctx.translate(-7, 0)
+                self.draw_text(ctx,'<b>' + str(self.getDayTemp(weather["list"][0])) + degree +'</b>', 90,25, self.font.split(' ')[0], 14,  self.width,pango.ALIGN_LEFT)
 
-                self.draw_text(ctx,'<b>' + weather[0]["where"][:weather[0]["where"].find(',')][:10] +'</b>', -5,50, self.font.split(' ')[0], 6, self.width,pango.ALIGN_RIGHT)
+                #self.draw_text(ctx,'<b>' + weather[0]["where"][:weather[0]["where"].find(',')][:10] +'</b>', -5,50, self.font.split(' ')[0], 6, self.width,pango.ALIGN_RIGHT)
 
             #    ctx.translate(0, 6)
             #    p_layout = ctx.create_layout()
@@ -421,24 +449,24 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
                     self.theme.render(ctx,'day-bg')
                     #self.theme['day-bg.svg'].render_cairo(ctx)   ###render the days background
                     #print self.theme.path
-                    self.draw_text(ctx,'<b>' +weather[1]["day"][:3] + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' + str(self.getMinTemp(weather["list"][1])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                 #    p_layout.set_markup('<b>' +weather[1]["day"][:3] + '</b>')
                 #    ctx.show_layout(p_layout)
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +weather[2]["day"][:3] + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][2])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +weather[3]["day"][:3] + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][3])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +weather[4]["day"][:3] + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][4])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +weather[5]["day"][:3] + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][5])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
                     ctx.translate(24, 0)
-                    self.draw_text(ctx,'<b>' +weather[6]["day"][:3] + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
+                    self.draw_text(ctx,'<b>' +str(self.getMinTemp(weather["list"][6])) + '</b>', 0,0, self.font.split(' ')[0], 6, self.width,pango.ALIGN_LEFT)
 
 
                     ctx.restore()
@@ -465,45 +493,45 @@ class ClearWeatherScreenlet(screenlets.Screenlet):
                     #ctx.restore()
 
 
-                    ctx.save()
-                    ctx.translate(14, 68)
-                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[1]["nighticon"]))+ '.png',22,22)
-                    ctx.translate(24,0)
-                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[2]["dayicon"]))+ '.png',22,22)
-                    ctx.translate(24,0)
-                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[3]["dayicon"]))+ '.png',22,22)
-                    ctx.translate(24, 0)
-                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[4]["dayicon"]))+ '.png',22,22)
-                    ctx.translate(24,0)
-                    self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[5]["dayicon"]))+ '.png',22,22)
-                    ctx.restore()
+                    #ctx.save()
+                    #ctx.translate(14, 68)
+                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[1]["nighticon"]))+ '.png',22,22)
+                    #ctx.translate(24,0)
+                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[2]["dayicon"]))+ '.png',22,22)
+                    #ctx.translate(24,0)
+                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[3]["dayicon"]))+ '.png',22,22)
+                    #ctx.translate(24, 0)
+                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[4]["dayicon"]))+ '.png',22,22)
+                    #ctx.translate(24,0)
+                    #self.draw_scaled_image(ctx,0,0,self.theme.path + '/' +self.get_icon(int(weather[5]["dayicon"]))+ '.png',22,22)
+                    #ctx.restore()
 
                     if self.show_daytemp == True:
                         ctx.save()
 
                         ctx.translate(16,90)
-                        self.draw_text(ctx,'<b>' + weather[1]["high"]+degree+'</b>'+ weather[1]["low"]+degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
+                        self.draw_text(ctx,'<b>' + str(self.getMaxTemp(weather["list"][1])) +degree+'</b>'+ str(self.getMinTemp(weather["list"][1])) +degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
                         ctx.translate(24, 0)
-                        self.draw_text(ctx,'<b>' + weather[2]["high"]+degree+'</b>'+ weather[2]["low"]+degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
+                        self.draw_text(ctx,'<b>' + str(self.getMaxTemp(weather["list"][2])) +degree+'</b>'+ str(self.getMinTemp(weather["list"][2])) +degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
                         ctx.translate(24,0)
-                        self.draw_text(ctx,'<b>' + weather[3]["high"]+degree+'</b>'+ weather[3]["low"]+degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
+                        self.draw_text(ctx,'<b>' + str(self.getMaxTemp(weather["list"][3])) +degree+'</b>'+ str(self.getMinTemp(weather["list"][3])) +degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
                         ctx.translate(24,0)
-                        self.draw_text(ctx,'<b>' + weather[4]["high"]+degree+'</b>'+ weather[4]["low"]+degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
+                        self.draw_text(ctx,'<b>' + str(self.getMaxTemp(weather["list"][4])) +degree+'</b>'+ str(self.getMinTemp(weather["list"][4])) +degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
                         ctx.translate(24,0)
-                        self.draw_text(ctx,'<b>' + weather[5]["high"]+degree+'</b>'+ weather[5]["low"]+degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
+                        self.draw_text(ctx,'<b>' + str(self.getMaxTemp(weather["list"][5])) +degree+'</b>'+ str(self.getMinTemp(weather["list"][5])) +degree, 0,0, self.font.split(' ')[0], 4, self.width,pango.ALIGN_LEFT)
 
 
                         ctx.restore()
 
 
 
-                self.draw_text(ctx,'<b>' + weather[1]["high"]+degree+'</b>', 68, 28, self.font.split(' ')[0], 5, self.width,pango.ALIGN_LEFT)
+                self.draw_text(ctx,'<b>' + str(self.getMaxTemp(weather["list"][1]))+degree+'</b>', 68, 28, self.font.split(' ')[0], 5, self.width,pango.ALIGN_LEFT)
 
 
-                self.draw_text(ctx,'<b>' + weather[1]["low"]+degree+'</b>', 68, 34, self.font.split(' ')[0], 5, self.width,pango.ALIGN_LEFT)
+                self.draw_text(ctx,'<b>' + str(self.getMinTemp(weather["list"][1]))+degree+'</b>', 68, 34, self.font.split(' ')[0], 5, self.width,pango.ALIGN_LEFT)
 
-                if weather[1]["dayppcp"] <> '0':
-                    self.draw_text(ctx,'<i>' + weather[1]["dayppcp"]+'%</i>', 68, 40, self.font.split(' ')[0], 5, self.width,pango.ALIGN_LEFT)
+                #if weather[1]["dayppcp"] <> '0':
+                    #self.draw_text(ctx,'<i>' + weather[1]["dayppcp"]+'%</i>', 68, 40, self.font.split(' ')[0], 5, self.width,pango.ALIGN_LEFT)
 
 
 
